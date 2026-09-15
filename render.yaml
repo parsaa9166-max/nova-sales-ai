@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: nova-sales-ai
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: FAL_KEY
+        sync: false
