@@ -1,29 +1,61 @@
 import { NextResponse } from 'next/server';
-import { getFal } from '../../../lib/fal';
+import { getFal, cleanJson } from '../../../lib/fal';
 
 export const runtime='nodejs';
-export const maxDuration=60;
 
-export async function POST(req){
+export async function GET(req){
   try{
-    const {imageUrl,analysis,style='clean'}=await req.json();
+    const id=new URL(req.url).searchParams.get('id');
 
-    if(!imageUrl)
+    if(!id)
       return NextResponse.json(
-        {error:'تصویر برای کنترل کیفیت لازم است.'},
+        {error:'شناسه درخواست کنترل کیفیت لازم است.'},
         {status:400}
       );
 
     const fal=getFal();
 
-    const {request_id}=await fal.queue.submit(
+    const status=await fal.queue.status(
       'openrouter/router/vision',
-      {
-        input:{
-          image_urls:[imageUrl],
-          model:process.env.NOVA_VISION_MODEL||'google/gemini-2.5-flash',
-          temperature:0,
-          max_tokens:700,
-          system_prompt:
-            'تو کنترل کیفیت عکس تبلیغاتی محصول هستی. فقط JSON معتبر بده. اگر چیزی را نمی‌توانی با اطمینان ببینی، آن را حدس نزن.',
-          prompt:`این تصویر خروجی تبلیغاتی محصول است. آن را با تحلیل محصول مقایسه کن: ${JSON.stringify(analysis||{})}. سبک مورد انتظار: ${style}. بررسی کن: آیا محصول اصلی هنوز قابل تشخیص و سالم است؟ آیا تغییر شکل، رنگ یا جزئیات مهم رخ داده؟ آیا محصول اضافه یا حذف شده؟ آیا متن یا واترمارک ساختگی روی تصویر هست؟ آیا تصویر برای تبلیغات فروش مناسب است؟ دقیقاً JSON بده با کلیدهای pass (boolean), score (0-100),
+      {requestId:id,logs:false}
+    );
+
+    if(status.status==='COMPLETED'){
+      const result=await fal.queue.result(
+        'openrouter/router/vision',
+        {requestId:id}
+      );
+
+      const raw=
+        result?.data?.output ??
+        result?.data?.text ??
+        result?.data;
+
+      const qc=
+        typeof raw==='string'
+          ? cleanJson(raw)
+          : raw;
+
+      return NextResponse.json({
+        status:'COMPLETED',
+        qc
+      });
+    }
+
+    if(status.status==='FAILED')
+      return NextResponse.json({
+        status:'FAILED',
+        error:'کنترل کیفیت تصویر ناموفق بود.'
+      });
+
+    return NextResponse.json({
+      status:status.status||'IN_PROGRESS'
+    });
+
+  }catch(e){
+    return NextResponse.json({
+      status:'FAILED',
+      error:e.message||'خطا در بررسی کنترل کیفیت'
+    },{status:500});
+  }
+}
